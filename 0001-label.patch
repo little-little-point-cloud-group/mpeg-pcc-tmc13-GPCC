@@ -1,0 +1,31 @@
+From 69e594d40d4d83f5f9a971a2ec664a2379d1fa57 Mon Sep 17 00:00:00 2001
+From: WeiZhang <wzhang@xidian.edu.cn>
+Date: Fri, 18 Jul 2025 11:30:03 +0800
+Subject: [PATCH] label
+
+---
+ tmc3/encoder.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tmc3/encoder.cpp b/tmc3/encoder.cpp
+index e6d33f29..053ad700 100644
+--- a/tmc3/encoder.cpp
++++ b/tmc3/encoder.cpp
+@@ -739,12 +739,12 @@ PCCTMC3Encoder3::compressPartition(
+ 
+     int coded_size = int(payload.size());
+     double bpp = double(8 * coded_size) / inputPointCloud.getPointCount();
+-    std::cout << label << "s bitstream size " << coded_size << " B (" << bpp
++    std::cout << it.first << "s bitstream size " << coded_size << " B (" << bpp
+               << " bpp)\n";
+ 
+     auto time_user = std::chrono::duration_cast<std::chrono::milliseconds>(
+       clock_user.count());
+-    std::cout << label
++    std::cout << it.first
+               << "s processing time (user): " << time_user.count() / 1000.0
+               << " s" << std::endl;
+ 
+-- 
+2.47.0.windows.2
+
