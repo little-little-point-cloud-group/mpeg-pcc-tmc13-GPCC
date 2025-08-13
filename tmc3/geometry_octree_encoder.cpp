@@ -1562,6 +1562,9 @@ encodeGeometryOctree(
   if (gps.octree_point_count_list_present_flag)
     gbh.footer.octree_lvl_num_points_minus1.reserve(maxDepth);
 
+  freopen("C:\\Users\\31046\\Desktop\\IDCM\\idcm\\build\\test\\test.txt", "w", stdout); 
+
+
   for (int depth = 0; depth < maxDepth; depth++) {
     // The tree terminated early (eg, due to IDCM or quantisation)
     // Delete any unused arithmetic coders
@@ -1769,6 +1772,31 @@ encodeGeometryOctree(
       // to the choice of QP.  There is therefore nothing to code with idcm.
       if (isLeafNode(effectiveNodeSizeLog2))
         node0.idcmEligible = false;
+
+
+      auto mode1 = canEncodeDirectPosition(
+        gps.geom_unique_points_flag, node0, pointCloud);
+
+      uint16_t e=0;
+      for (int ii = 0; ii < 6; ii++)
+        e += (gnp.neighPattern >> ii) & 1;
+      e = ((int(node0.numSiblingsPlus1) - 1) << 3) | e;
+      std::cout << ">>> C&level: " << depth << " points: " << node0.pos[0]
+                << " " << node0.pos[1] << " " << node0.pos[2] << " "
+                << "eligible: " << node0.idcmEligible << " "
+                << "&numPoints: " << node0.end - node0.start
+                << " gnp:" << int(e);
+      Vec3<int> colors = {0, 0, 0};
+      if (int(mode1) > 0 && node0.idcmEligible)
+        colors = {0, 0, 255};
+      else if (node0.idcmEligible)
+        colors = {255, 0, 0};
+      else if (int(mode1) > 0)
+        colors = {255, 255, 0};
+
+      std::cout << " #colors: " << colors[0] << " " << colors[1] << " "
+                << colors[2] << std::endl;
+
 
       if (node0.idcmEligible) {
         // todo(df): this is pessimistic in the presence of idcm quantisation,
@@ -1998,6 +2026,8 @@ encodeGeometryOctree(
   }
   pointCloud2.resize(outIdx);
   swap(pointCloud, pointCloud2);
+
+  std::cout << ">>> end" << std::endl;
 }
 
 //============================================================================
