@@ -1,4 +1,4 @@
-# JEE 6.2 software for G-PCC-based Anchor Generation 
+# JEE 6.2 & JEE6.6 software for G-PCC-based Anchor Generation 
 
 ## Building
 

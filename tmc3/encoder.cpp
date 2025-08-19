@@ -739,12 +739,12 @@ PCCTMC3Encoder3::compressPartition(
 
     int coded_size = int(payload.size());
     double bpp = double(8 * coded_size) / inputPointCloud.getPointCount();
-    std::cout << it.first << "s bitstream size " << coded_size << " B (" << bpp
+    std::cout << label << "s bitstream size " << coded_size << " B (" << bpp
               << " bpp)\n";
 
     auto time_user = std::chrono::duration_cast<std::chrono::milliseconds>(
       clock_user.count());
-    std::cout << it.first
+    std::cout << label
               << "s processing time (user): " << time_user.count() / 1000.0
               << " s" << std::endl;
 
