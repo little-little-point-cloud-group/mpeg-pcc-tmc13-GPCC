@@ -4,6 +4,7 @@
 #include <array>
 #include <string>
 #include <vector>
+#include <map>
 #include <unordered_map>
 #include <stdexcept>
 #include <algorithm>
@@ -29,6 +30,11 @@ namespace pcc {
         static std::vector<std::string>& getGSKeys() {
             return gskeys;
         }
+
+        static std::vector<std::string>& getGSKeys(int id) { 
+            return attrMaps[id]; 
+        }
+
         static void addGSKey(std::string s){
             gskeys.push_back(s);
         }
@@ -45,6 +51,8 @@ namespace pcc {
         }
 
         static std::vector<std::string> gskeys;
+
+        static std::map<int, std::vector<std::string>> attrMaps;
     };
 }
 

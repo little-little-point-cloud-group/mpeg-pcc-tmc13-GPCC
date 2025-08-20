@@ -116,6 +116,13 @@ protected:
     PCCResidualsDecoder& decoder,
     PCCPointSet3& pointCloud);
 
+  void decode3DGSRaht(
+    const AttributeDescription& desc,
+    const AttributeParameterSet& aps,
+    const QpSet& qpSet,
+    PCCResidualsDecoder& decoder,
+    PCCPointSet3& pointCloud);
+
   void decodeColorsRaht(
     const AttributeDescription& desc,
     const AttributeParameterSet& aps,

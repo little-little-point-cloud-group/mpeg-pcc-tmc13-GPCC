@@ -64,8 +64,11 @@ public:
 
   int decodeRunLength();
   int decodeSymbol(int k1, int k2, int k3);
+  int decodeSymbol(int k1, int k2, int k3,int n);
   void decode(int32_t values[3]);
+  void decode(int32_t values[], int attribCount);
   int32_t decode();
+
 };
 
 //----------------------------------------------------------------------------
@@ -136,7 +139,23 @@ PCCResidualsDecoder::decodeSymbol(int k1, int k2, int k3)
 
   return coeff_abs_minus2 + 2;
 }
+//----------------------------------------------------------------------------
 
+int
+PCCResidualsDecoder::decodeSymbol(int k1, int k2, int k3,int n)
+{
+  attrContexts;
+  if (!arithmeticDecoder.decode(attrContexts[n].ctxCoeffGtN[0][k1]))
+    return 0;
+
+  if (!arithmeticDecoder.decode(attrContexts[n].ctxCoeffGtN[1][k2]))
+    return 1;
+
+  int coeff_abs_minus2 = arithmeticDecoder.decodeExpGolomb(
+    1, attrContexts[n].ctxCoeffRemPrefix[k3],attrContexts[n].ctxCoeffRemSuffix[k3]);
+
+  return coeff_abs_minus2 + 2;
+}
 //----------------------------------------------------------------------------
 
 void
@@ -159,7 +178,25 @@ PCCResidualsDecoder::decode(int32_t value[3])
   if (value[0] && arithmeticDecoder.decode())
     value[0] = -value[0];
 }
+//----------------------------------------------------------------------------
 
+void
+PCCResidualsDecoder::decode(int32_t value[], int attribCount)
+{
+  bool inferLastComp = true;
+  for (int i = 0; i < attribCount - 1; i++) {
+    value[i] = decodeSymbol(0, 0, 1,i);
+    inferLastComp &= value[i] == 0;
+    if (value[i] && arithmeticDecoder.decode())
+      value[i] = -value[i];
+  }
+
+  value[attribCount - 1] =decodeSymbol(0, 0, 1, attribCount - 1) + inferLastComp;
+
+  if (value[attribCount - 1] && arithmeticDecoder.decode())
+      value[attribCount - 1] = -value[attribCount - 1];
+
+}
 //----------------------------------------------------------------------------
 
 int32_t
@@ -216,7 +253,11 @@ AttributeDecoder::decode(
     _lods.generate(
       attr_aps, abh, geom_num_points_minus1, minGeomNodeSizeLog2, pointCloud);
 
-  if (attr_desc.attr_num_dimensions_minus1 == 0) {
+
+   if (attr_desc.is3DGS) {
+       decode3DGSRaht(attr_desc, attr_aps, qpSet, decoder, pointCloud);
+   }
+  else if (attr_desc.attr_num_dimensions_minus1 == 0) {
     switch (attr_aps.attr_encoding) {
     case AttributeEncoding::kRAHTransform:
       decodeReflectancesRaht(attr_desc, attr_aps, qpSet, decoder, pointCloud);
@@ -257,10 +298,6 @@ AttributeDecoder::decode(
       // Already handled
       break;
     }
-  } else {
-    assert(
-      attr_desc.attr_num_dimensions_minus1 == 0
-      || attr_desc.attr_num_dimensions_minus1 == 2);
   }
 
   decoder.stop();
@@ -553,6 +590,84 @@ AttributeDecoder::decodeReflectancesRaht(
     }
   }
 
+}
+
+//----------------------------------------------------------------------------
+void
+AttributeDecoder::decode3DGSRaht(
+  const AttributeDescription& desc,
+  const AttributeParameterSet& aps,
+  const QpSet& qpSet,
+  PCCResidualsDecoder& decoder,
+  PCCPointSet3& pointCloud)
+{
+  const int voxelCount = int(pointCloud.getPointCount());
+  std::vector<MortonCodeWithIndex> packedVoxel(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    packedVoxel[n].mortonCode = mortonAddr(pointCloud[n]);
+    packedVoxel[n].index = n;
+  }
+  sort(packedVoxel.begin(), packedVoxel.end());
+
+  // Morton codes
+  std::vector<int64_t> mortonCode(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    mortonCode[n] = packedVoxel[n].mortonCode;
+  }
+
+  // Entropy decode
+  const int attribCount = desc.attr_num_dimensions_minus1+1;
+  std::vector<int> coefficients(attribCount * voxelCount);
+  std::vector<Qps> pointQpOffsets(voxelCount);
+
+  int zeroRunRem = 0;
+  for (int n = 0; n < voxelCount; ++n) {
+    if (--zeroRunRem < 0)
+      zeroRunRem = decoder.decodeRunLength();
+
+    int32_t values[21] = {};
+    if (!zeroRunRem)
+      decoder.decode(values,attribCount);
+
+    for (int d = 0; d < attribCount; ++d) {
+      coefficients[voxelCount * d + n] = values[d];
+    }
+    pointQpOffsets[n] = qpSet.regionQpOffset(pointCloud[packedVoxel[n].index]);
+  }
+
+
+  std::vector<int> attributes(attribCount * voxelCount);
+  const int rahtPredThreshold[2] = {
+    aps.raht_prediction_threshold0, aps.raht_prediction_threshold1};
+
+  regionAdaptiveHierarchicalInverseTransform(
+    aps.raht_prediction_enabled_flag, rahtPredThreshold, qpSet,
+    pointQpOffsets.data(), mortonCode.data(), attributes.data(), attribCount,
+    voxelCount, coefficients.data());
+
+  if (!desc.is3DGS) {
+    const int64_t maxReflectance = (1 << desc.bitdepth) - 1;
+    const int64_t minReflectance = 0;
+    for (int n = 0; n < voxelCount; n++) {
+      int64_t val = attributes[attribCount * n];
+      const attr_t reflectance =
+        attr_t(PCCClip(val, minReflectance, maxReflectance));
+      pointCloud.setReflectance(packedVoxel[n].index, reflectance);
+    }
+  } else {
+    auto keys = GSHelper::getGSKeys(desc.attr_instance_id);
+    const int64_t maxVal = (1 << desc.bitdepth) - 1;
+    const int64_t minVal = -1 * (1 << desc.bitdepth);
+    // const int64_t minVal = 0;
+    for (int n = 0; n < voxelCount; n++) {
+      for (int i = 0; i < keys.size(); i++) {
+        auto key = keys[i];
+        int64_t val = attributes[attribCount * n+i];
+        const gs_t attr = gs_t(PCCClip(val, minVal, maxVal));
+        pointCloud.setGSInfo(packedVoxel[n].index, key, attr);
+      }
+    }
+  }
 }
 
 //----------------------------------------------------------------------------

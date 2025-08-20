@@ -108,6 +108,13 @@ protected:
     PCCPointSet3& pointCloud,
     PCCResidualsEncoder& encoder);
 
+  void encode3DGSTransformRaht(
+    const AttributeDescription& desc,
+    const AttributeParameterSet& aps,
+    const QpSet& qpSet,
+    PCCPointSet3& pointCloud,
+    PCCResidualsEncoder& encoder);
+
   void encodeColorsTransformRaht(
     const AttributeDescription& desc,
     const AttributeParameterSet& aps,

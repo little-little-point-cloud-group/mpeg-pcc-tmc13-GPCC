@@ -70,8 +70,10 @@ public:
 
   void encodeRunLength(int runLength);
   void encodeSymbol(uint32_t value, int k1, int k2, int k3);
+  void encodeSymbol(uint32_t value, int k1, int k2, int k3, int n);
   void encode(int32_t value0, int32_t value1, int32_t value2);
   void encode(int32_t value);
+  void encode(int32_t value[], int attribCount);
 
   int availPredModes;
   double bitsPtColor(Vec3<int32_t> value, int parity);
@@ -102,12 +104,20 @@ PCCResidualsEncoder::PCCResidualsEncoder(
 }
 
 //----------------------------------------------------------------------------
+bool isAllZeros(int32_t value[], int attribCount)
+{
+  bool zero = true;
+  for (int i = 0; i < attribCount; i++)
+    zero &= value[i] == 0;
+  return zero;
+}
+//----------------------------------------------------------------------------
 
 void
 PCCResidualsEncoder::start(const SequenceParameterSet& sps, int pointCount)
 {
   // todo(df): remove estimate when arithmetic codec is replaced
-  int maxAcBufLen = pointCount * 3 * 2 + 1024;
+  int maxAcBufLen = pointCount * 21 * 2 + 1024;
   arithmeticEncoder.setBuffer(maxAcBufLen, nullptr);
   arithmeticEncoder.enableBypassStream(sps.cabac_bypass_stream_enabled_flag);
   arithmeticEncoder.start();
@@ -266,7 +276,22 @@ PCCResidualsEncoder::encodeSymbol(uint32_t value, int k1, int k2, int k3)
   arithmeticEncoder.encodeExpGolomb(
     --value, 1, ctxCoeffRemPrefix[k3], ctxCoeffRemSuffix[k3]);
 }
+//----------------------------------------------------------------------------
 
+void PCCResidualsEncoder::encodeSymbol(uint32_t value, int k1, int k2, int k3, int n)
+{
+
+  arithmeticEncoder.encode(value > 0, attrContexts[n].ctxCoeffGtN[0][k1]);
+  if (!value)
+    return;
+
+  arithmeticEncoder.encode(--value > 0, attrContexts[n].ctxCoeffGtN[1][k2]);
+  if (!value)
+    return;
+
+  arithmeticEncoder.encodeExpGolomb(
+    --value, 1, attrContexts[n].ctxCoeffRemPrefix[k3],attrContexts[n].ctxCoeffRemSuffix[k3]);
+}
 //----------------------------------------------------------------------------
 
 void
@@ -295,6 +320,23 @@ PCCResidualsEncoder::encode(int32_t value0, int32_t value1, int32_t value2)
     arithmeticEncoder.encode(value0 < 0);
 }
 
+//----------------------------------------------------------------------------
+void
+PCCResidualsEncoder::encode(int32_t value[], int attribCount)
+{
+  int inferLastComp = 1;
+  for (int i = 0; i < attribCount-1; i++) {
+    int mag = abs(value[i]);
+    inferLastComp &= mag == 0;
+    encodeSymbol(mag, 0, 0, 0,i);
+    if (mag)
+        arithmeticEncoder.encode(value[i] < 0);
+  }
+  int mag = abs(value[attribCount - 1]) - inferLastComp;
+  encodeSymbol(mag, 0, 0, 0, attribCount - 1);
+  if (mag || inferLastComp)
+    arithmeticEncoder.encode(value[attribCount - 1] < 0);
+}
 //----------------------------------------------------------------------------
 
 void
@@ -489,7 +531,11 @@ AttributeEncoder::encode(
   PCCResidualsEncoder encoder(attr_aps, abh, ctxtMem);
   encoder.start(sps, int(pointCloud.getPointCount()));
 
-  if (desc.attr_num_dimensions_minus1 == 0) {
+    if (desc.is3DGS) {
+      encode3DGSTransformRaht(
+        desc, attr_aps, qpSet, pointCloud, encoder);
+    }
+   else if (desc.attr_num_dimensions_minus1 == 0) {
     switch (attr_aps.attr_encoding) {
     case AttributeEncoding::kRAHTransform:
       encodeReflectancesTransformRaht(
@@ -526,10 +572,6 @@ AttributeEncoder::encode(
       // Already handled
       break;
     }
-  } else {
-    assert(
-      desc.attr_num_dimensions_minus1 == 0
-      || desc.attr_num_dimensions_minus1 == 2);
   }
 
   uint32_t acDataLen = encoder.stop();
@@ -1101,6 +1143,102 @@ AttributeEncoder::encodeReflectancesTransformRaht(
     } 
   }
   
+}
+
+
+//----------------------------------------------------------------------------
+void
+AttributeEncoder::encode3DGSTransformRaht(
+  const AttributeDescription& desc,
+  const AttributeParameterSet& aps,
+  const QpSet& qpSet,
+  PCCPointSet3& pointCloud,
+  PCCResidualsEncoder& encoder)
+{
+  const int voxelCount = int(pointCloud.getPointCount());
+  std::vector<MortonCodeWithIndex> packedVoxel(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    packedVoxel[n].mortonCode = mortonAddr(pointCloud[n]);
+    packedVoxel[n].index = n;
+  }
+  sort(packedVoxel.begin(), packedVoxel.end());
+
+  // Allocate arrays.
+  const int attribCount = desc.attr_num_dimensions_minus1+1;
+  std::vector<int64_t> mortonCode(voxelCount);
+  std::vector<int> attributes(attribCount * voxelCount);
+  std::vector<int> coefficients(attribCount * voxelCount);
+  std::vector<Qps> pointQpOffsets(voxelCount);
+
+  // Populate input arrays.
+  for (int n = 0; n < voxelCount; n++) {
+    mortonCode[n] = packedVoxel[n].mortonCode;
+    if (!desc.is3DGS) {
+      const auto reflectance = pointCloud.getReflectance(packedVoxel[n].index);
+      attributes[attribCount * n] = reflectance;
+    } else {
+      auto keys = GSHelper::getGSKeys(desc.attr_instance_id);
+      for (int i = 0; i < keys.size(); i++) {
+        auto key = keys[i];
+        const auto values = pointCloud.getGSInfo(packedVoxel[n].index, key);
+        attributes[attribCount * n+i] = values;
+      }
+      
+    }
+    pointQpOffsets[n] = qpSet.regionQpOffset(pointCloud[packedVoxel[n].index]);
+  }
+
+  const int rahtPredThreshold[2] = {
+    aps.raht_prediction_threshold0, aps.raht_prediction_threshold1};
+
+  // Transform.
+  regionAdaptiveHierarchicalTransform(
+    aps.raht_prediction_enabled_flag, rahtPredThreshold, qpSet,
+    pointQpOffsets.data(), mortonCode.data(), attributes.data(), attribCount,
+    voxelCount, coefficients.data());
+
+  // Entropy encode.
+  int values[21];
+  int zeroRun = 0;
+  for (int n = 0; n < voxelCount; ++n) {
+    for (int d = 0; d < attribCount; ++d) {
+      values[d] = coefficients[voxelCount * d + n];
+    }
+    if (isAllZeros(values, attribCount))
+      ++zeroRun;
+    else {
+      encoder.encodeRunLength(zeroRun);
+      encoder.encode(values,attribCount);
+      zeroRun = 0;
+    }
+  }
+  if (zeroRun)
+    encoder.encodeRunLength(zeroRun);
+
+
+  if (!desc.is3DGS) {
+    const int64_t maxReflectance = (1 << desc.bitdepth) - 1;
+    const int64_t minReflectance = 0;
+    for (int n = 0; n < voxelCount; n++) {
+      int64_t val = attributes[attribCount * n];
+      const attr_t reflectance =
+        attr_t(PCCClip(val, minReflectance, maxReflectance));
+      pointCloud.setReflectance(packedVoxel[n].index, reflectance);
+    }
+  } else {
+    auto keys = GSHelper::getGSKeys(desc.attr_instance_id);
+    const int64_t maxVal = (1 << desc.bitdepth) - 1;
+    const int64_t minVal = -1 * (1 << desc.bitdepth);
+    // const int64_t minVal = 0;
+    for (int n = 0; n < voxelCount; n++) {
+      for (int i = 0; i < keys.size(); i++) {
+        auto key = keys[i];
+        int64_t val = attributes[attribCount * n+i];
+        const gs_t attr = gs_t(PCCClip(val, minVal, maxVal));
+        pointCloud.setGSInfo(packedVoxel[n].index, key, attr);
+      }
+    }
+  }
 }
 
 //----------------------------------------------------------------------------

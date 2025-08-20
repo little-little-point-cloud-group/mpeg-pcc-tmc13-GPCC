@@ -45,6 +45,22 @@
 namespace pcc {
 
 //============================================================================
+class AttrCtx {
+public:
+  void reset();
+
+  AdaptiveBitModel ctxRunLen[5];
+  AdaptiveBitModel ctxCoeffGtN[2][7];
+  AdaptiveBitModel ctxCoeffRemPrefix[2][3];
+  AdaptiveBitModel ctxCoeffRemSuffix[2][3];
+};
+
+inline void
+AttrCtx::reset()
+{
+  this->~AttrCtx();
+  new (this) AttrCtx;
+}
 
 class AttributeContexts {
 public:
@@ -55,6 +71,7 @@ protected:
   AdaptiveBitModel ctxCoeffGtN[2][7];
   AdaptiveBitModel ctxCoeffRemPrefix[2][3];
   AdaptiveBitModel ctxCoeffRemSuffix[2][3];
+  AttrCtx attrContexts[21];
 };
 
 //----------------------------------------------------------------------------
@@ -66,7 +83,7 @@ AttributeContexts::reset()
   new (this) AttributeContexts;
 }
 
-//============================================================================
+  //============================================================================
 
 struct AttributeLods {
   // Indicates if the generated LoDs are compatible with the provided aps

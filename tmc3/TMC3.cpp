@@ -555,12 +555,10 @@ ParseParameters(int argc, char* argv[], Parameters& params)
         {name, int(params.encoder.attributeIdxMap.size())});
 
       if(params.isDecoder) {
-        GSHelper::addGSKey(it.first->first);
         params.decoder.gs_ext = true;
         return;
       }
       if(gs_ext && !params.isDecoder){
-        GSHelper::addGSKey(it.first->first);
         params_attr.desc.is3DGS = true;
       }
 
@@ -1019,6 +1017,10 @@ ParseParameters(int argc, char* argv[], Parameters& params)
     params_attr.desc.bitdepth, 8,
     "Attribute bitdepth")
 
+   ("attrNumDimensions",
+    params_attr.desc.attr_num_dimensions_minus1, 1,
+    "Attribute bitdepth")
+
   ("defaultValue",
     params_attr.desc.params.attr_default_value, {},
     "Default attribute component value(s) in case of data omission")
@@ -1437,13 +1439,10 @@ sanitizeEncoderOpts(
     }
 
     if (attr_sps.is3DGS) {
-      // Avoid wasting bits signalling chroma quant step size for reflectance
-      attr_aps.aps_chroma_qp_offset = 0;
-      attr_enc.abh.attr_layer_qp_delta_chroma.clear();
 
       // There is no matrix for reflectace
       attrMeta.cicp_matrix_coefficients_idx = ColourMatrix::kUnspecified;
-      attr_sps.attr_num_dimensions_minus1 = 0;
+      attr_sps.attr_num_dimensions_minus1 -= 1;
       attr_sps.attributeLabel = KnownAttributeLabel::kReflectance;
 
       attr_sps.attr_instance_id = it.second;

@@ -573,16 +573,15 @@ uraht_process(
 {
   // coefficients are stored in three planar arrays.  coeffBufItK is a set
   // of iterators to each array.
-  int32_t* coeffBufItK[3] = {
-    coeffBufIt,
-    coeffBufIt + numPoints,
-    coeffBufIt + numPoints * 2,
-  };
+  int32_t* coeffBufItK[21];
+  for (int n = 0; n < numAttrs; n++)
+    coeffBufItK[n] = coeffBufIt + n * numPoints;
 
   if (numPoints == 1) {
     auto quantizers = qpset.quantizers(0, pointQpOffsets[0]);
     for (int k = 0; k < numAttrs; k++) {
-      auto& q = quantizers[std::min(k, int(quantizers.size()) - 1)];
+      int qp_index = (numAttrs / 3) <= k;
+      auto& q = quantizers[std::min(qp_index, int(quantizers.size()) - 1)];
 
       if (isEncoder) {
         auto coeff = attributes[k];
@@ -702,7 +701,7 @@ uraht_process(
 
     for (int i = 0, iLast, iEnd = weightsLf.size(); i < iEnd; i = iLast) {
       // todo(df): hoist and dynamically allocate
-      FixedPoint transformBuf[6][8] = {};
+      FixedPoint transformBuf[42][8] = {};
       FixedPoint(*transformPredBuf)[8] = &transformBuf[numAttrs];
       int weights[8 + 8 + 8 + 8] = {};
       Qps nodeQp[8] = {};
@@ -846,7 +845,8 @@ uraht_process(
           for (int k = 0; k < numAttrs; k++) {
             //auto q = Quantizer(qpLayer[std::min(k, int(quantizers.size()) - 1)] + nodeQp[idx]);
             auto quantizers = qpset.quantizers(qpLayer, nodeQp[idx]);
-            auto& q = quantizers[std::min(k, int(quantizers.size()) - 1)];
+            int qp_index = (numAttrs/3)<=k;
+            auto& q =quantizers[std::min(qp_index, int(quantizers.size()) - 1)];
             auto coeff = transformBuf[k][idx].round();
             dist2 += coeff * coeff;
             auto Qcoeff = q.quantize(coeff << kFixedPointAttributeShift);
@@ -893,8 +893,8 @@ uraht_process(
         for (int k = 0; k < numAttrs; k++) {
           if (flagRDOQ) // apply RDOQ
             transformBuf[k][idx].val = 0;
-
-          auto& q = quantizers[std::min(k, int(quantizers.size()) - 1)];
+          int qp_index = (numAttrs / 3) <= k;
+          auto& q = quantizers[std::min(qp_index, int(quantizers.size()) - 1)];
 
           if (isEncoder) {
             auto coeff = transformBuf[k][idx].round();
@@ -975,8 +975,8 @@ uraht_process(
     }
 
     // duplicates
-    FixedPoint attrSum[3];
-    FixedPoint attrRecDc[3];
+    FixedPoint attrSum[21];
+    FixedPoint attrRecDc[21];
     FixedPoint sqrtWeight;
     sqrtWeight.val = isqrt(uint64_t(weight) << (2 * FixedPoint::kFracBits));
 
@@ -997,7 +997,8 @@ uraht_process(
 
       auto quantizers = qpset.quantizers(qpLayer, nodeQp);
       for (int k = 0; k < numAttrs; k++) {
-        auto& q = quantizers[std::min(k, int(quantizers.size()) - 1)];
+        int qp_index = (numAttrs / 3) <= k;
+        auto& q = quantizers[std::min(qp_index, int(quantizers.size()) - 1)];
 
         FixedPoint transformBuf[2];
         if (isEncoder) {
